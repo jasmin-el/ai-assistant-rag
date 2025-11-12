@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatBot Azure OpenAI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px;
+        }
+        .chat-container { width: 100%; max-width: 800px; height: 90vh; background: white; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; }
+        .chat-header { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; padding: 20px; text-align: center; }
+        .chat-header h1 { font-size: 1.5em; margin-bottom: 5px; }
+        .chat-header p { opacity: 0.9; font-size: 0.9em; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; background: #f8fafc; }
+        .message { margin-bottom: 15px; display: flex; align-items: flex-start; }
+        .user-message { justify-content: flex-end; }
+        .bot-message { justify-content: flex-start; }
+        .message-bubble { max-width: 70%; padding: 12px 16px; border-radius: 18px; word-wrap: break-word; line-height: 1.4; }
+        .user-bubble { background: #4f46e5; color: white; border-bottom-right-radius: 4px; }
+        .bot-bubble { background: white; color: #333; border: 1px solid #e2e8f0; border-bottom-left-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .message-time { font-size: 0.7em; opacity: 0.7; margin-top: 5px; text-align: right; }
+        .chat-input-container { padding: 20px; background: white; border-top: 1px solid #e2e8f0; }
+        .input-group { display: flex; gap: 10px; }
+        #user-input { flex: 1; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 25px; outline: none; font-size: 14px; transition: border-color 0.3s; }
+        #user-input:focus { border-color: #4f46e5; }
+        #send-button { padding: 12px 24px; background: #4f46e5; color: white; border: none; border-radius: 25px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.3s; }
+        #send-button:hover:not(:disabled) { background: #3730a3; }
+        #send-button:disabled { background: #9ca3af; cursor: not-allowed; }
+        .typing-indicator { display: none; padding: 12px 16px; background: white; border-radius: 18px; border-bottom-left-radius: 4px; margin-bottom: 15px; max-width: 70%; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .typing-dots { display: flex; gap: 4px; }
+        .typing-dot { width: 8px; height: 8px; background: #9ca3af; border-radius: 50%; animation: typing 1.4s infinite; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing { 0%,60%,100%{transform:translateY(0);opacity:0.4;} 30%{transform:translateY(-10px);opacity:1;} }
+        .chat-messages::-webkit-scrollbar { width: 6px; }
+        .chat-messages::-webkit-scrollbar-track { background: #f1f1f1; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .chat-messages::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .error-message { background: #fee2e2 !important; color: #dc2626 !important; border: 1px solid #fecaca !important; }
+        .welcome-message { text-align: center; background: #dbeafe !important; color: #1e40af !important; border: 1px solid #93c5fd !important; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>🤖 ChatBot Azure OpenAI</h1>
+            <p>Powered by your Azure deployment</p>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="typing-indicator" id="typing-indicator">
+            <div class="typing-dots">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+        </div>
+        <div class="chat-input-container">
+            <div class="input-group">
+                <input type="text" id="user-input" placeholder="Tapez votre message ici..." autocomplete="off">
+                <button id="send-button">Envoyer</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class ChatInterface {
+            constructor() {
+                this.chatMessages = document.getElementById('chat-messages');
+                this.userInput = document.getElementById('user-input');
+                this.sendButton = document.getElementById('send-button');
+                this.typingIndicator = document.getElementById('typing-indicator');
+
+                this.initEventListeners();
+                this.showWelcomeMessage();
+                this.showChatHistory();
+            }
+
+            initEventListeners() {
+                this.sendButton.addEventListener('click', () => this.sendMessage());
+                this.userInput.addEventListener('keypress', e => { if(e.key==='Enter') this.sendMessage(); });
+                this.userInput.addEventListener('input', () => { this.sendButton.disabled = !this.userInput.value.trim(); });
+                this.userInput.focus();
+            }
+
+            showWelcomeMessage() {
+                if(!sessionStorage.getItem('chatHistory')) {
+                    const welcomeDiv = document.createElement('div');
+                    welcomeDiv.className = 'message bot-message';
+                    const bubble = document.createElement('div');
+                    bubble.className = 'message-bubble bot-bubble welcome-message';
+                    bubble.innerHTML = `<strong>🎉 Bienvenue !</strong><br>Je suis votre assistant IA. Posez-moi n'importe quelle question !<div class="message-time">${this.getCurrentTime()}</div>`;
+                    welcomeDiv.appendChild(bubble);
+                    this.chatMessages.appendChild(welcomeDiv);
+                }
+            }
+
+            async sendMessage() {
+                const message = this.userInput.value.trim();
+                if (!message) return;
+                this.addMessage('user', message);
+                this.userInput.value = '';
+                this.sendButton.disabled = true;
+                this.showTypingIndicator();
+
+                try {
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message })
+                    });
+                    const data = await response.json();
+                    this.hideTypingIndicator();
+                    if(data.error) {
+                        this.showError(data.error);
+                    } else {
+                        this.addMessage('bot', data.response);
+                    }
+                } catch(e) {
+                    this.hideTypingIndicator();
+                    this.showError(e.message);
+                    console.error(e);
+                }
+            }
+
+            addMessage(sender, text) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}-message`;
+                const bubble = document.createElement('div');
+                bubble.className = `message-bubble ${sender}-bubble`;
+                bubble.textContent = text;
+                const time = document.createElement('div');
+                time.className = 'message-time';
+                time.textContent = this.getCurrentTime();
+                bubble.appendChild(time);
+                messageDiv.appendChild(bubble);
+                this.chatMessages.appendChild(messageDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+                this.saveChatHistory(sender, text);
+            }
+
+            showError(errorMessage) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'message bot-message';
+                const bubble = document.createElement('div');
+                bubble.className = 'message-bubble bot-bubble error-message';
+                bubble.innerHTML = `<strong>❌ Erreur</strong><br>${errorMessage}<div class="message-time">${this.getCurrentTime()}</div>`;
+                errorDiv.appendChild(bubble);
+                this.chatMessages.appendChild(errorDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            showTypingIndicator() { this.typingIndicator.style.display = 'block'; this.chatMessages.scrollTop = this.chatMessages.scrollHeight; }
+            hideTypingIndicator() { this.typingIndicator.style.display = 'none'; }
+
+            saveChatHistory(sender, text) {
+                let chatHistory = JSON.parse(sessionStorage.getItem('chatHistory')) || [];
+                chatHistory.push({ sender, text, time: this.getCurrentTime() });
+                sessionStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+            }
+
+            showChatHistory() {
+                const chatHistory = JSON.parse(sessionStorage.getItem('chatHistory')) || [];
+                chatHistory.forEach(msg => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `message ${msg.sender}-message`;
+                    const bubble = document.createElement('div');
+                    bubble.className = `message-bubble ${msg.sender}-bubble`;
+                    bubble.textContent = msg.text;
+                    const time = document.createElement('div');
+                    time.className = 'message-time';
+                    time.textContent = msg.time;
+                    bubble.appendChild(time);
+                    messageDiv.appendChild(bubble);
+                    this.chatMessages.appendChild(messageDiv);
+                });
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+
+            getCurrentTime() {
+                return new Date().toLocaleTimeString('fr-FR',{ hour:'2-digit', minute:'2-digit' });
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            window.chatInterface = new ChatInterface();
+        });
+    </script>
+</body>
+</html>
