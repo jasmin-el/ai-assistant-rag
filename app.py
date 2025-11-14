@@ -34,7 +34,7 @@ def chat():
         response = openai.ChatCompletion.create(
             engine=deployment_name,
             messages=[{"role": "user", "content": user_input}],
-            max_tokens=200
+            max_tokens=500
         )
         
         bot_response = response["choices"][0]["message"]["content"]
